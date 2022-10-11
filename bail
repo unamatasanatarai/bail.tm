@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# -----------------------------------------------------------------------------
+# CONFIG
+# -----------------------------------------------------------------------------
+
+__VERSION="0.1"
+__NAME="Template App"
+__FILE=$(basename "$0")
+__CACHE=${XDG_STATE_HOME:=$HOME/.config/state}/bail
+readonly __VERSION __FILE __NAME __CACHE
+mkdir -p "$__CACHE"
+
+current_account="$__CACHE"/account
+touch "$current_account"
+
+url="https://api.mail.tm"
+readonly url
+
+password='D~%8W_UE'
+
+# -----------------------------------------------------------------------------
+# PRIVATE interfaces
+# -----------------------------------------------------------------------------
+
+function _get_domain {
+  domain=$(curl -s "$url/domains" | jq -r '."hydra:member"[0].domain')
+  echo "$domain"
+}
+
+function _random {
+  openssl rand -hex 5
+}
+
+# -----------------------------------------------------------------------------
+# PUBLIC interfaces
+# -----------------------------------------------------------------------------
+
+function create { # Create a new account
+  __parse_options "$@"
+  domain=$(_get_domain)
+  address=$(_random)"@$domain"
+  data='{ "address":"'$address'", "password":"'$password'" }'
+  account=$(curl -s "$url/accounts" \
+    -H 'Content-Type: application/json' \
+    -d "$data")
+  echo "$account" | jq '.+= {"password":"'"$password"'"}' > "$__CACHE"/account
+  echo "created"
+  jq ".address" "$current_account"
+}
+
+function me { # List all created acounts
+  jq < "$current_account"
+}
+
+function _token {
+  curl -s "$url/token" \
+    -H 'Content-Type: application/json' \
+    -d '{"address":"'"$1"'", "password":"'"$2"'"}' \
+    | jq -r ".token"
+}
+
+function messages {
+  address=$(jq -r ".address" < "$current_account")
+  password=$(jq -r ".password" < "$current_account")
+  token=$(_token "$address" "$password")
+  messages=$(curl -s "$url/messages" -H "Authorization:Bearer $token")
+  opts=$(echo "$messages" | jq -r '."hydra:member"[] | .from.name +"<"+ .from.address +">√"+ .subject' | column -t -s "√")
+  mapfile -t opts <<< "$opts"
+  c=0
+  for i in "${opts[@]}"; do
+    echo -e "$c\t$i"
+    c=$((c + 1))
+  done
+  echo -n "pick a number: "
+  read -r picked
+  msg=$(echo "$messages" | jq -r '."hydra:member"['"$picked"'] .id')
+  message=$(curl -s "$url/messages/$msg" -H "Authorization:Bearer $token")
+  echo "from:"
+  echo "$message" | jq -r '.from.name + "<" + .from.address + ">"'
+  echo ""
+  echo "subject:"
+  echo "$message" | jq -r '.subject'
+  echo ""
+  echo "message:"
+  echo -e "$(echo "$message" | jq -r '.text')"
+}
+
+# -----------------------------------------------------------------------------
+
+function help { # Display this helpful help information
+  local functions
+  functions=$(grep -E "^function [^_]*?$" "$0" | sed -E "s/ *{ *# */#/g" | column -t -s '#' | sed -E "s/^function /   /g" | sort)
+  echo "$__NAME v $__VERSION"
+  echo "Usage: $__FILE <task> [args]"
+  echo ""
+  echo "Tasks:"
+  echo "$functions"
+  echo "args:"
+  echo "   -p   define custom password, default: $password"
+  echo ""
+}
+
+function __parse_options {
+  while getopts "p:" o; do
+    case "$o" in
+      p)
+        password=${OPTARG:-$password}
+        ;;
+      *) ;;
+
+    esac
+  done
+  shift $((OPTIND - 1))
+}
+
+"${@:-help}"
