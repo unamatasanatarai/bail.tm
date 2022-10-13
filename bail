@@ -20,6 +20,7 @@ url="https://api.mail.tm"
 readonly url
 
 password='D~%8W_UE'
+custom_password=0
 
 # -----------------------------------------------------------------------------
 # PRIVATE interfaces
@@ -34,11 +35,14 @@ function _random {
   openssl rand -hex "${1:-5}"
 }
 
-function _password {
-  if command -v pwgen; then
-    pwgen -Cnys 20 1
-  else
-    _random 10
+function _gen_password {
+  if [ "$custom_password" == 0 ]; then
+    custom_password=1
+    if command -v pwgen &> /dev/null; then
+      password=$(pwgen -Cns 20 1)
+    else
+      password=$(_random 10)
+    fi
   fi
 }
 
@@ -48,6 +52,7 @@ function _password {
 
 function create { # Create a new account
   __parse_options "$@"
+  _gen_password
   domain=$(_get_domain)
   address=$(_random)"@$domain"
   data='{ "address":"'$address'", "password":"'$password'" }'
@@ -60,7 +65,21 @@ function create { # Create a new account
 }
 
 function me { # List all created acounts
-  jq < "$current_account"
+  address=$(jq -r ".address" < "$current_account")
+  pass=$(jq -r ".password" < "$current_account")
+  token=$(_token "$address" "$pass")
+  curl -s "$url/me" -H "Authorization:Bearer $token" | jq
+}
+
+function delete { # Delete an account
+  __parse_options "$@"
+  id=$(jq -r '.id' < "$current_account")
+  address=$(jq -r ".address" < "$current_account")
+  pass=$(jq -r ".password" < "$current_account")
+  token=$(_token "$address" "$pass")
+  curl -s -XDELETE "$url/accounts/$id" -H "Authorization:Bearer $token"
+  rm "$current_account"
+  echo "deleted current account"
 }
 
 function _token {
@@ -72,8 +91,8 @@ function _token {
 
 function messages {
   address=$(jq -r ".address" < "$current_account")
-  password=$(jq -r ".password" < "$current_account")
-  token=$(_token "$address" "$password")
+  pass=$(jq -r ".password" < "$current_account")
+  token=$(_token "$address" "$pass")
   messages=$(curl -s "$url/messages" -H "Authorization:Bearer $token")
   opts=$(echo "$messages" | jq -r '."hydra:member"[] | .from.name +"<"+ .from.address +">√"+ .subject' | column -t -s "√")
   mapfile -t opts <<< "$opts"
@@ -107,7 +126,7 @@ function help { # Display this helpful help information
   echo "Tasks:"
   echo "$functions"
   echo "args:"
-  echo "   -p   define custom password, default: $password"
+  echo "   -p   define custom password"
   echo ""
 }
 
@@ -116,6 +135,7 @@ function __parse_options {
     case "$o" in
       p)
         password=${OPTARG:-$password}
+        custom_password=1
         ;;
       *) ;;
 
