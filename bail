@@ -31,7 +31,15 @@ function _get_domain {
 }
 
 function _random {
-  openssl rand -hex 5
+  openssl rand -hex "${1:-5}"
+}
+
+function _password {
+  if command -v pwgen; then
+    pwgen -Cnys 20 1
+  else
+    _random 10
+  fi
 }
 
 # -----------------------------------------------------------------------------
