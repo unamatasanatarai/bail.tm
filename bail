@@ -50,11 +50,15 @@ function _gen_password {
 # PUBLIC interfaces
 # -----------------------------------------------------------------------------
 
-function create { # Create a new account
+function create { # Create a new account, create [prefix]
   __parse_options "$@"
   _gen_password
   domain=$(_get_domain)
-  address=$(_random)"@$domain"
+  if [[ -n $* ]]; then
+    address=$*"@$domain"
+  else
+    address=$(_random)"@$domain"
+  fi
   data='{ "address":"'$address'", "password":"'$password'" }'
   account=$(curl -s "$url/accounts" \
     -H 'Content-Type: application/json' \
@@ -89,7 +93,7 @@ function _token {
     | jq -r ".token"
 }
 
-function messages {
+function messages { # get messages
   address=$(jq -r ".address" < "$current_account")
   pass=$(jq -r ".password" < "$current_account")
   token=$(_token "$address" "$pass")
